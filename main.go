@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
@@ -145,6 +146,23 @@ func CurrentHard(client *redis.Client) int64 {
 	return hard
 }
 
+// CheckLovePower 检查用过的lovepower
+func CheckLovePower(client *redis.Client, form Wish) bool {
+	key := fmt.Sprintf("love:power:%s:%s:%s", form.Address, form.LovePower, form.Code)
+	_, err := client.Get(key).Result()
+
+	if err != redis.Nil {
+		return false
+	}
+
+	err = client.Set(key, "used", 120*time.Second).Err()
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
 func main() {
 	client := RedisClient()
 
@@ -163,15 +181,24 @@ func main() {
 		hard := int(CurrentHard(client))
 		if err := c.ShouldBind(&form); err == nil {
 			ore := RawOre(form)
+
 			if MatchWish(hard, ore) {
-				res := PostWish(form)
-				c.JSON(http.StatusOK, gin.H{
-					"success": res.Success,
-					"hard":    res.Hard,
-					"type":    res.Type,
-					"amount":  res.Amount,
-					"stock":   res.Stock,
-				})
+				if CheckLovePower(client, form) {
+					res := PostWish(form)
+					c.JSON(http.StatusOK, gin.H{
+						"success": res.Success,
+						"hard":    res.Hard,
+						"type":    res.Type,
+						"amount":  res.Amount,
+						"stock":   res.Stock,
+					})
+				} else {
+					c.JSON(http.StatusOK, gin.H{
+						"success": false,
+						"msg":     "CheckLovePower failed",
+						"hard":    hard,
+					})
+				}
 			} else {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
